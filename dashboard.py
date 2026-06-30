@@ -95,6 +95,7 @@ with st.sidebar:
         st.session_state.reset = True
         st.rerun()
 
+
 # fdf = filtered with status, fd = filtered without status
 # Need fd for enrollment/dropout counts (all statuses matter there)
 mask = (df["YEAR"].between(sel_years[0], sel_years[1])
@@ -122,6 +123,12 @@ if sel_grades:
 if pass_only:
     fd = fd[fd["PERCENTAGE"] >= 33]
 
+with st.sidebar:
+    st.divider()
+    csv_data = fdf.to_csv(index=False).encode("utf-8")
+    st.download_button("Download filtered data as CSV", csv_data,
+                       "filtered_school_data.csv", "text/csv")
+
 subjects = ["HINDI_TOTAL", "ENGLISH_TOTAL", "SCIENCE_TOTAL",
             "SOCIAL_SCIENCE_TOTAL", "SANSKRIT_URDU_TOTAL", "MATHS_TOTAL"]
 subj_lbl = ["Hindi", "English", "Science", "S.Science", "Sanskrit/Urdu", "Maths"]
@@ -142,9 +149,9 @@ st.markdown(f'<h1><span class="dec"></span>School Performance Dashboard</h1>',
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #st.markdown("*For government officials and education administrators*")
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Overview  &  Trends", "Enrollment  &  Classes",
-    "Performance  Analysis", "Student  Flow"])
+    "Performance  Analysis", "Student  Flow", "Student  Search"])
 
 with tab1:
     k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -380,6 +387,20 @@ with tab3:
         corr = sc["ATTENDANCE_PERCENT"].corr(sc["PERCENTAGE"])
         st.metric("Correlation", f"{corr:.2f}")
 
+    st.divider()
+    st.markdown("<h2>Subject Correlation Matrix</h2>", unsafe_allow_html=True)
+    st.markdown("How closely do marks in different subjects move together?")
+    cm = fdf[subjects].corr()
+    cm_labels = [s.replace("_TOTAL", "").replace("_", " ") for s in subjects]
+    fig = px.imshow(cm.values, x=cm_labels, y=cm_labels,
+                    text_auto=".2f", aspect="auto",
+                    color_continuous_scale="RdBu_r",
+                    zmin=-1, zmax=1,
+                    labels={"x": "", "y": "", "color": "Correlation"})
+    fig.update_layout(template=tmpl, height=400,
+                      margin=dict(l=0, r=0, t=0, b=0))
+    st.plotly_chart(fig, use_container_width=True, config=dict(displayModeBar=False))
+
 with tab4:
     c1, c2 = st.columns(2)
     with c1:
@@ -453,6 +474,48 @@ with tab4:
         fig.update_layout(template=tmpl, height=340,
                           margin=dict(l=0, r=0, t=30, b=0))
         st.plotly_chart(fig, use_container_width=True, config=dict(displayModeBar=False))
+
+with tab5:
+    st.markdown("<h2>Track a Student</h2>", unsafe_allow_html=True)
+    all_ids = fd["STUDENT_ID"].unique()
+    sid = st.text_input("Enter full or partial Student ID", "",
+                        placeholder="e.g. STUDENT_123")
+    if sid:
+        match = [s for s in all_ids if sid.upper() in s.upper()]
+        if not match:
+            st.warning(f"No student found matching &quot;{sid}&quot;")
+        elif len(match) > 50:
+            st.info(f"{len(match)} students match. Showing first 50 — narrow your search.")
+            sd = fd[fd["STUDENT_ID"].isin(match[:50])]
+            st.dataframe(sd, use_container_width=True, hide_index=True)
+        else:
+            sd = fd[fd["STUDENT_ID"].isin(match)]
+            st.dataframe(sd, use_container_width=True, hide_index=True)
+            for sid2 in match:
+                sr = sd[sd["STUDENT_ID"] == sid2].sort_values("YEAR")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=sr["YEAR"], y=sr["PERCENTAGE"],
+                                         mode="lines+markers+text",
+                                         text=sr["PERCENTAGE"].round(1),
+                                         textposition="top center",
+                                         name="Percentage",
+                                         line=dict(color=C2, width=2)))
+                fig.add_trace(go.Scatter(x=sr["YEAR"], y=sr["ATTENDANCE_PERCENT"],
+                                         mode="lines+markers",
+                                         name="Attendance %",
+                                         line=dict(color=C5, width=2, dash="dot")))
+                for _, r in sr.iterrows():
+                    fig.add_annotation(x=r["YEAR"], y=r["PERCENTAGE"],
+                                       text=f"Class {int(r['CLASS'])}-{r['SECTION']}",
+                                       showarrow=True, arrowhead=1, arrowsize=1,
+                                       font=dict(size=9), opacity=0.7)
+                fig.update_layout(title=f"Journey of {sid2}",
+                                  template=tmpl, height=350,
+                                  margin=dict(l=0, r=0, t=30, b=0))
+                st.plotly_chart(fig, use_container_width=True,
+                                config=dict(displayModeBar=False))
+    else:
+        st.info("Type a Student ID above to see their full journey.")
 
 st.divider()
 st.markdown(f"<p style='opacity:0.6;font-size:0.75rem;'>"
